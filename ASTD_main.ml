@@ -147,17 +147,16 @@ let _ = Arg.parse arg_spec usage usage_msg;
 	let
 	  nameBFile = (if (name == "") then "MachineName" else name)
 	in
-	()
-(*	print_endline(ASTD_translate.translate*)
-(*			structure*)
-(*			nameBFile*)
-(*			refine*)
-(*			sees*)
-(*			includes*)
-(*			nocalls*)
-(*			invariants*)
-(*			assertions*)
-(*			simpl);*)
+	print_endline(ASTD_translate.translate
+			structure
+			nameBFile
+			refine
+			sees
+			includes
+			nocalls
+			invariants
+			assertions
+			simpl);
   end
 ;;
   
