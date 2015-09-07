@@ -1315,3 +1315,30 @@ let translate astd name refine sees includes nocalls inv ass simpl =
 		 operations = List.rev_map (finalizeOpe nocalls) (List.rev_map snd opeList)} in
   print_machine machine;;
 
+let rec hasLocalEdge state arrows = match arrows with
+	|[] -> false
+	| a::l ->
+		if (ASTD_arrow.get_from a = ASTD_arrow.get_to a) && ASTD_arrow.get_from a = state then
+			true
+		else
+			hasLocalEdge state l;;
+
+let rec removeLocalEdge state arrows = match arrows with
+	|[] -> []
+	| a::l ->
+		if (ASTD_arrow.get_from a = ASTD_arrow.get_to a) && ASTD_arrow.get_from a = state then
+			l
+		else
+			a::(removeLocalEdge state l);;
+
+let rec minimize astd = 
+	match astd with
+	|Kleene (_, sub_astd) -> 
+		begin
+			match sub_astd with
+			|Automata (_, _,  arrows, _, _, _) -> 
+				while hasLocalEdge (ASTD_astd.get_init sub_astd) arrows then
+					let localEdge = getLocalEdge (ASTD_astd.get_init sub_astd) arrows in
+					
+		end;
+	astd;;

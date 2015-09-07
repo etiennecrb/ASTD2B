@@ -140,23 +140,24 @@ let _ = Arg.parse arg_spec usage usage_msg;
   in
   begin if (sFile=="") then get_structure(place_to_read) else get_structure_from_file(place_to_read^sFile) ;
 	let startingName = if starting = "" then "MAIN" else starting in
-	let structure=ASTD_astd.get_astd startingName
+	let structure=ASTD_translate.minimize (ASTD_astd.get_astd startingName)
 	in 
 	let invariants = readInvFile invFile place_to_read and assertions = readAssertFile assertFile place_to_read
 	in
 	let
 	  nameBFile = (if (name == "") then "MachineName" else name)
 	in
-	print_endline(ASTD_translate.translate
-			structure
-			nameBFile
-			refine
-			sees
-			includes
-			nocalls
-			invariants
-			assertions
-			simpl)
+	()
+(*	print_endline(ASTD_translate.translate*)
+(*			structure*)
+(*			nameBFile*)
+(*			refine*)
+(*			sees*)
+(*			includes*)
+(*			nocalls*)
+(*			invariants*)
+(*			assertions*)
+(*			simpl);*)
   end
 ;;
   
