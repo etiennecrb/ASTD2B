@@ -28,6 +28,7 @@ BASE = functions \
 	ASTD_optimisation \
 	ASTD_astd \
 	ASTD_translate \
+	ASTD_minimize \
 	ASTD_state \
 
 
