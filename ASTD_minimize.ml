@@ -98,33 +98,42 @@ let rec kleeneTransformArrowsFromFinalToInit init_name final_name arrowsToFinal 
   	else
   		a::kleeneTransformArrowsFromFinalToInit init_name final_name arrowsToFinal l
   		
-let rec getArrowsFrom state_name arrows =
+let rec getArrowsFrom state_names arrows =
   match arrows with
     | [] -> []
     | a::l ->
-      if (get_from a) = state_name then
-        a::(getArrowsFrom state_name l)
+      if List.exists (function name -> (get_from a) = name) state_names then
+        a::(getArrowsFrom state_names l)
       else
-        getArrowsFrom state_name l
+        getArrowsFrom state_names l
         
-let rec getArrowsTo state_name arrows =
+let rec getArrowsFromWithLabel state_names label arrows =
   match arrows with
     | [] -> []
     | a::l ->
-      if (get_to a) = state_name then
-        a::(getArrowsTo state_name l)
+      if List.exists (function name -> (get_from a) = name && (get_label_transition a) = label) state_names then
+        a::(getArrowsFromWithLabel state_names label l)
       else
-        getArrowsTo state_name l
+        getArrowsFromWithLabel state_names label l
+        
+let rec getArrowsTo state_names arrows =
+  match arrows with
+    | [] -> []
+    | a::l ->
+      if List.exists (function name -> (get_to a) = name) state_names then
+        a::(getArrowsTo state_names l)
+      else
+        getArrowsTo state_names l
 
 let rec kleeneTransformArrowsFinals final_names arrows =
   match final_names with
   | [] -> arrows
-  | a::l -> kleeneTransformArrowsFinal a (getArrowsTo a arrows) (kleeneTransformArrowsFinals l arrows)
+  | a::l -> kleeneTransformArrowsFinal a (getArrowsTo [a] arrows) (kleeneTransformArrowsFinals l arrows)
   
 let rec kleeneTransformArrowsFromFinalsToInit init_name final_names arrows =
   match final_names with
   | [] -> arrows
-  | a::l -> kleeneTransformArrowsFromFinalToInit init_name a (getArrowsTo a arrows) (kleeneTransformArrowsFromFinalsToInit init_name l arrows)
+  | a::l -> kleeneTransformArrowsFromFinalToInit init_name a (getArrowsTo [a] arrows) (kleeneTransformArrowsFromFinalsToInit init_name l arrows)
 
 (* Return the list of the Elem ASTD contained in a list of ASTDs,
 the Elem ASTD contained in their sub ASTDs and recursively.
@@ -288,18 +297,12 @@ let rec changeArrowsOrigin origins new_origin arrows =
         a :: (changeArrowsOrigin origins new_origin l)
 
 let kleeneTransformArrows init_name final_names arrows =
-  let temp_arrows1 = kleeneTransformArrowsInit init_name (getArrowsFrom init_name arrows) arrows in
+  let temp_arrows1 = kleeneTransformArrowsInit init_name (getArrowsFrom [init_name] arrows) arrows in
   let temp_arrows2 = kleeneTransformArrowsFinals final_names temp_arrows1 in
   let temp_arrows3 = kleeneTransformArrowsFromFinalsToInit init_name final_names temp_arrows2 in
   let temp_arrows4 = changeArrowsDestination final_names init_name temp_arrows3 in
   changeArrowsOrigin final_names init_name temp_arrows4
-
-(* Converting NFAs to DFAS *)
-let convertNFAtoDFA astd =
-  match astd with
-    | Automata(astd_name, sub_astds, arrows, shallow_final_names, deep_final_names, init_name) ->
-      astd
-    | _ -> astd
+      
 
 let rec minimize astd = 
 	match astd with
