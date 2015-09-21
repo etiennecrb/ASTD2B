@@ -1,308 +1,185 @@
 open ASTD_B;;
 open ASTD_astd;;
 open ASTD_arrow;;
+module SS = Set.Make(String);;
 
-(* Return the list of the names of all Elem for converting Kleene to Automata,
-including those which needs to be created *)
-let rec kleeneTransformElems init_name final_names arrows =
-  match arrows with
-  | [] -> []
-  | a::l ->
-  	if (get_from a = get_to a) && List.exists (function state -> state = (get_from a)) (init_name::final_names) then
-  		(elem_of ((get_from a)^"_"^(ASTD_label.string_of (get_label_transition a))))::kleeneTransformElems init_name final_names l
-  	else
-  	  if (get_to a = init_name) && List.exists (function state -> state = (get_from a)) final_names then
-    	  (elem_of ((get_from a)^"_"^(ASTD_label.string_of (get_label_transition a))))::kleeneTransformElems init_name final_names l
-    	else
-    	  kleeneTransformElems init_name final_names l
-
-(* Return the list of the needed arrows for converting Kleene to Automata
-to remove loop arrows for the init state *)
-let rec kleeneTransformArrowsInit init_name arrowsFromInit arrows =
-  match arrows with
-  | [] -> []
-  | a::l ->
-  	if (get_from a = get_to a) && (init_name = (get_from a)) then
-  		let new_node_name = init_name^"_"^(ASTD_label.string_of (get_label_transition a)) in
-  		let b = [(local_arrow init_name
-    		                    (new_node_name)
-    		                    (get_transition a)
-    		                    (get_predicates a)
-    		                    false)
-    		    ; (local_arrow  new_node_name
-    		                    new_node_name
-    		                    (get_transition a)
-    		                    (get_predicates a)
-    		                    false)]
-  		  in
-  		let c = List.map (function arrow -> local_arrow new_node_name
-  		                                                (get_to arrow)
-  		                                                (get_transition arrow)
-  		                                                (get_predicates arrow)
-  		                                                false) arrowsFromInit
-  		  in
-  		b@c@(kleeneTransformArrowsInit init_name arrowsFromInit l)
-  	else
-  		a::kleeneTransformArrowsInit init_name arrowsFromInit l
-
-(* Return the list of the needed arrows for converting Kleene to Automata
-to remove loop arrows for a final state *)
-let rec kleeneTransformArrowsFinal final_name arrowsToFinal arrows =
-  match arrows with
-  | [] -> []
-  | a::l ->
-  	if (get_from a = get_to a) && (final_name = (get_from a)) then
-  		let new_node_name = (get_from a)^"_"^(ASTD_label.string_of (get_label_transition a)) in
-  		let b = [(local_arrow new_node_name
-    		                    final_name
-    		                    (get_transition a)
-    		                    (get_predicates a)
-    		                    false)
-    		    ; (local_arrow  new_node_name
-    		                    new_node_name
-    		                    (get_transition a)
-    		                    (get_predicates a)
-    		                    false)]
-  		  in
-  		let c = List.map (function arrow -> local_arrow new_node_name
-  		                                                (get_to arrow)
-  		                                                (get_transition arrow)
-  		                                                (get_predicates arrow)
-  		                                                false) arrowsToFinal
-  		  in
-  		b@c@(kleeneTransformArrowsFinal final_name arrowsToFinal l)
-  	else
-  		a::kleeneTransformArrowsFinal final_name arrowsToFinal l
-  		
-(* Return the list of the needed arrows for converting Kleene to Automata
-to remove arrows from a final state to init *)
-let rec kleeneTransformArrowsFromFinalToInit init_name final_name arrowsToFinal arrows =
-  match arrows with
-  | [] -> []
-  | a::l ->
-  	if (get_from a = final_name) && (get_to a = init_name) then
-  		let new_node_name = (get_from a)^"_"^(ASTD_label.string_of (get_label_transition a)) in
-  		let b = [(local_arrow new_node_name
-    		                    final_name
-    		                    (get_transition a)
-    		                    (get_predicates a)
-    		                    false)]
-  		  in
-  		let c = List.map (function arrow -> local_arrow (get_from arrow)
-  		                                                new_node_name
-  		                                                (get_transition arrow)
-  		                                                (get_predicates arrow)
-  		                                                false) arrowsToFinal
-  		  in
-  		b@c@(kleeneTransformArrowsFromFinalToInit init_name final_name arrowsToFinal l)
-  	else
-  		a::kleeneTransformArrowsFromFinalToInit init_name final_name arrowsToFinal l
-  		
-let rec getArrowsFrom state_names arrows =
-  match arrows with
-    | [] -> []
-    | a::l ->
-      if List.exists (function name -> (get_from a) = name) state_names then
-        a::(getArrowsFrom state_names l)
-      else
-        getArrowsFrom state_names l
-        
-let rec getArrowsFromWithLabel state_names label arrows =
-  match arrows with
-    | [] -> []
-    | a::l ->
-      if List.exists (function name -> (get_from a) = name && (get_label_transition a) = label) state_names then
-        a::(getArrowsFromWithLabel state_names label l)
-      else
-        getArrowsFromWithLabel state_names label l
-        
-let rec getArrowsTo state_names arrows =
-  match arrows with
-    | [] -> []
-    | a::l ->
-      if List.exists (function name -> (get_to a) = name) state_names then
-        a::(getArrowsTo state_names l)
-      else
-        getArrowsTo state_names l
-
-let rec kleeneTransformArrowsFinals final_names arrows =
-  match final_names with
-  | [] -> arrows
-  | a::l -> kleeneTransformArrowsFinal a (getArrowsTo [a] arrows) (kleeneTransformArrowsFinals l arrows)
+(* Return an equivalent automata without arrows from final state or to initial state *)
+let rec kleeneTransform kleene_name automata =
+  let isToTransform arrow =
+    (get_to arrow = get_init automata)
+    || List.mem (get_from arrow) ((get_shallow_final automata)@(get_deep_final automata)) in
+  let arrows_to_transform = List.filter isToTransform (get_arrows automata) in
   
-let rec kleeneTransformArrowsFromFinalsToInit init_name final_names arrows =
-  match final_names with
-  | [] -> arrows
-  | a::l -> kleeneTransformArrowsFromFinalToInit init_name a (getArrowsTo [a] arrows) (kleeneTransformArrowsFromFinalsToInit init_name l arrows)
-
-(* Return the list of the Elem ASTD contained in a list of ASTDs,
-the Elem ASTD contained in their sub ASTDs and recursively.
-
-ASTDs and sub ASTDs must be Elem or Automata *)
-let rec bringOutElems astds =
-  match astds with
-    | [] -> []
-    | a::l ->
-      (match a with
-        | Elem (_) -> a::(bringOutElems l)
-        | Automata (_, sub_astds, _, _, _, _) -> (bringOutElems sub_astds)@(bringOutElems l)
-        | _ -> failwith "bringOutElems argument must be a list of Elem and Automata (0)"
-      )
-    | _ -> failwith "bringOutElems argument must be a list of Elem and Automata (1)"
+  match arrows_to_transform with
+    | [] -> 
+      (* Merge final and init states *)
+      let sub_astds = List.filter (function astd -> not( List.mem (get_name astd) ((get_shallow_final automata)@(get_deep_final automata))))
+                        (get_sub automata) in
+      let arrows = List.map (function arrow ->
+                                if List.mem (get_to arrow) ((get_shallow_final automata)@(get_deep_final automata)) then
+                                  local_arrow (get_from arrow) (get_init automata) (get_transition arrow) (get_predicates arrow) false
+                                else
+                                  arrow
+                            ) (get_arrows automata)
+      in
       
-(* Return the list of the arrows contained in a list of ASTDs,
-the arrows contained in their sub ASTDs and recursively.
-
-Given ASTDs and their sub ASTDs must be Elem or Automata *)
-let rec bringOutArrows astds =
-  match astds with
-    | [] -> []
+      automata_of kleene_name
+                  sub_astds
+                  arrows
+                  [(get_init automata)]
+  					      []
+  					      (get_init automata)
+  	
     | a::l ->
-      (match a with
-        | Elem (_) -> bringOutArrows l
-        | Automata (_, sub_astds, arrows, _, _, _) -> arrows@(bringOutArrows sub_astds)@(bringOutArrows l)
-        | _ -> failwith "bringOutArrows argument must be a list of Elem and Automata (0)"
-      )
-    | _ -> failwith "bringOutArrows argument must be a list of Elem and Automata (1)"
+      (* One elementary state is added *)
+      let new_elem_name = (get_from a)^(get_label_transition a)^(get_to a) in
+      
+      (* Rerouting the a arrow to the new state *)
+      let rerouted_arrows = 
+        let from_state = if (get_to a) = (get_init automata) then get_from a else new_elem_name in
+        let to_state = if (get_to a) = (get_init automata) then new_elem_name else get_to a in
+        ((local_arrow from_state to_state (get_transition a) (get_predicates a) false)
+          :: (List.filter (function arrow -> not(arrow = a)) (get_arrows automata)))
+      in
+      
+      (* Adding to the new state the same successors as init state *)
+      (* or the same predecessors as final state *)
+      let new_arrows = 
+        if (get_to a) = (get_init automata) then
+          List.map (function arrow -> local_arrow new_elem_name (get_to arrow) (get_transition arrow) (get_predicates arrow) false)
+            (List.filter (function arrow -> (get_from arrow) = (get_to a)) (get_arrows automata))
+        else
+          List.map (function arrow -> local_arrow (get_from arrow) new_elem_name (get_transition arrow) (get_predicates arrow) false)
+            (List.filter (function arrow -> (get_to arrow) = (get_from a)) (get_arrows automata))
+      in
+      kleeneTransform kleene_name (automata_of  (get_name automata)
+                                                ((elem_of new_elem_name)::(get_sub automata))
+                                                (rerouted_arrows@new_arrows)
+                                                (get_shallow_final automata)
+                                                (get_deep_final automata)
+                                                (get_init automata))
 
-(* Transform arrows from an Automata ASTD to local arrows between Elem ASTD
-that have the same propertiers.
-Given sub ASTDs must be Elem or Automata *)
-let rec transformArrowsIntoLocalBetweenElem sub_astds arrows =
-  match arrows with
-    | [] -> []
+
+let rec automataTransform automata =
+  let sub_astds = get_sub automata in
+  let astds_to_transform = List.filter (function astd -> match astd with | Elem (_) -> false | _ -> true) sub_astds in
+  
+  match astds_to_transform with
+    | [] -> automata
     | a::l ->
-      (match a with
-        | Local (from_state_name, to_state_name, transition, predicates, from_final_state) ->
-          let to_state_astd = find_subastd to_state_name sub_astds in
-          let from_state_astd = find_subastd from_state_name sub_astds in
-          (match to_state_astd with
-            | Elem (_) ->
-              (match from_state_astd with
-                | Elem (_) ->
-                  (* Local arrow between Elem ASTD, no changes *)
-                  a::(transformArrowsIntoLocalBetweenElem sub_astds l)
-                
-                | Automata (_, deep_sub_astds_from, _, shallow_final_from, deep_final_from, _) ->
-                  (* Local arrow from Automata to Elem *)
-                  if from_final_state then
-                    (* Transform the arrow into new arrows from shallow and deep final states of Automata to targeted Elem *)
-                    ((List.map (function elem_name -> local_arrow elem_name to_state_name transition predicates false) shallow_final_from)
-                     @(List.map (function elem_name -> local_arrow elem_name to_state_name transition predicates false) deep_final_from)
-                     @(transformArrowsIntoLocalBetweenElem sub_astds l))
-                  else
-                    (* Transform the arrow into new arrows from all sub ASTDs of Automata to targeted Elem *)
-                    ((List.map (function elem -> local_arrow (get_name elem) to_state_name transition predicates false) deep_sub_astds_from)
-                     @(transformArrowsIntoLocalBetweenElem sub_astds l))
-                | _ -> failwith "transformArrowsIntoLocalBetweenElem sub_astds argument must be Elem or Automata with Elem sub ASTDs"
-              )
-            | Automata (_, _, _, _, _, init_name_to) ->
-              (match from_state_astd with
-                | Elem (_) ->
-                  (* Local arrow from Elem to Automata *)
-                  (* Transform the arrow into a local arrow from Elem to init state of targeted Automata *)
-                  (local_arrow from_state_name init_name_to transition predicates false)::(transformArrowsIntoLocalBetweenElem sub_astds l)
-                | Automata (_, deep_sub_astds_from, _, shallow_final_from, deep_final_from, _) ->
-                  (* Local arrow from Automata to Automata *)
-                  if from_final_state then
-                    (* Transform the arrow into new arrows from shallow and deep final states of Automata to init state of targeted Automata *)
-                    ((List.map (function elem_name -> local_arrow elem_name init_name_to transition predicates false) shallow_final_from)
-                     @(List.map (function elem_name -> local_arrow elem_name init_name_to transition predicates false) deep_final_from)
-                     @(transformArrowsIntoLocalBetweenElem sub_astds l))
-                  else
-                    (* Transform the arrow into new arrows from all sub ASTDs of Automata to init state of targeted Automata *)
-                    ((List.map (function elem -> local_arrow (get_name elem) init_name_to transition predicates false) deep_sub_astds_from)
-                     @(transformArrowsIntoLocalBetweenElem sub_astds l))
-                | _ -> failwith "transformArrowsIntoLocalBetweenElem sub_astds argument must be Elem or Automata with Elem sub ASTDs"
-              )
-            | _ -> failwith "transformArrowsIntoLocalBetweenElem sub_astds argument must be Elem or Automata with Elem sub ASTDs"
-          )
-          
-        | From_sub (from_state_name, to_state_name, through_state_name, transition, predicates, from_final_state) ->
-          let to_state_astd = find_subastd to_state_name sub_astds in
-          (match to_state_astd with
-            | Elem (_) ->
-              (* From_sub arrow from Elem to Elem *)
-              (* Transform arrow into local arrow *)
-              (local_arrow from_state_name to_state_name transition predicates false)::(transformArrowsIntoLocalBetweenElem sub_astds l)
-            | Automata (_, _, _, _, _, init_name_to) ->
-              (* From_sub arrow from Elem to Automata *)
-              (* Transform arrow into local arrow from Elem to init state of targeted Automata *)
-              (local_arrow from_state_name init_name_to transition predicates false)::(transformArrowsIntoLocalBetweenElem sub_astds l)
-            | _ -> failwith "transformArrowsIntoLocalBetweenElem sub_astds argument must be Elem or Automata with Elem sub ASTDs"
-          )
-        | To_sub (from_state_name, to_state_name, through_state_name, transition, predicates, from_final_state) ->
-          let from_state_astd = find_subastd from_state_name sub_astds in
-          (match from_state_astd with
-            | Elem (_) ->
-              (* To_sub arrow from Elem to Elem *)
-              (* Transform arrow into local arrow *)
-              (local_arrow from_state_name to_state_name transition predicates false)::(transformArrowsIntoLocalBetweenElem sub_astds l)
-            | Automata (_, deep_sub_astds_from, _, shallow_final_from, deep_final_from, _) ->
-              (* To_sub arrow from Automata to Elem *)
-              if from_final_state then
-                (* Transform the arrow into new arrows from shallow and deep final states of Automata to targeted Elem *)
-                ((List.map (function elem_name -> local_arrow elem_name to_state_name transition predicates false) shallow_final_from)
-                 @(List.map (function elem_name -> local_arrow elem_name to_state_name transition predicates false) deep_final_from)
-                 @(transformArrowsIntoLocalBetweenElem sub_astds l))
+      let new_elems = get_sub a in
+      let rerouteArrow arrow =
+        if (get_from arrow) = (get_name a) || (get_to arrow) = (get_name a) then
+          match arrow with
+            | Local (from_name, to_name, transition, predicates, is_final) ->
+              if (get_from arrow) = (get_name a) then
+                List.map (function state -> local_arrow (get_name state) to_name transition predicates is_final)
+                  (List.filter (function state -> not(is_final) || List.mem (get_name state) ((get_shallow_final a)@(get_deep_final a))) (get_sub a))
               else
-                (* Transform the arrow into new arrows from all sub ASTDs of Automata to targeted Elem *)
-                ((List.map (function elem -> local_arrow (get_name elem) to_state_name transition predicates false) deep_sub_astds_from)
-                 @(transformArrowsIntoLocalBetweenElem sub_astds l))
-            | _ -> failwith "transformArrowsIntoLocalBetweenElem sub_astds argument must be Elem or Automata with Elem sub ASTDs"
-          )
-        | _ -> failwith "transformArrowsIntoLocalBetweenElem second argument must be a list of arrows"
-      )
+                [local_arrow from_name (get_init a) transition predicates is_final]
+            | From_sub (from_name, to_name, through_name, transition, predicates, is_final) ->
+              if through_name = (get_name a) then
+                [local_arrow from_name to_name transition predicates is_final]
+              else
+                [local_arrow from_name (get_init a) transition predicates is_final]
+            | To_sub (from_name, to_name, through_name, transition, predicates, is_final) ->
+              if through_name = (get_name a) then
+                [local_arrow from_name to_name transition predicates is_final]
+              else
+                List.map (function state -> local_arrow (get_name state) to_name transition predicates is_final)
+                  (List.filter (function state -> not(is_final) || List.mem (get_name state) ((get_shallow_final a)@(get_deep_final a))) (get_sub a))
+        else
+          [arrow]
+      in
+      let elems = new_elems@(List.filter (function astd -> not(astd = a)) sub_astds) in
+      let arrows = (get_arrows a)@(List.concat (List.map rerouteArrow (get_arrows automata))) in
+      let init_name = if (get_init automata) = (get_name a) then get_init a else get_init automata in
+      automataTransform (automata_of  (get_name automata)
+                                      elems
+                                      arrows
+                                      (get_shallow_final automata)
+                                      (get_deep_final automata)
+                                      init_name)
 
-(* Return a list of ASTDs without those whose names are in the given list *)
-let rec removeASTDs astds_to_remove astds =
-  match astds with
-    | [] -> []
-    | a:: l ->
-      if List.exists (function name -> (get_name a) = name) astds_to_remove then
-        removeASTDs astds_to_remove l
-      else
-        a :: (removeASTDs astds_to_remove l)
 
-(* Return the given arrows where those targeting to an element of destinations
-are redirected to new_destination
-!! Modified arrows are returned as Local arrows !! *)
-let rec changeArrowsDestination destinations new_destination arrows =
-  match arrows with
+let rec removeDuplicates l =
+  match l with
     | [] -> []
+    | a::l -> if List.mem a l then removeDuplicates l else a::(removeDuplicates l)
+
+let rec fromListToString l =
+  match l with
+    | [] -> ""
+    | a::l -> a^(fromListToString l)
+
+(* Converting NFAs to DFAs *)
+let rec determinize_step nfa dfa stack =
+  match stack with
+    | [] -> dfa
     | a::l ->
-      if List.exists (function name -> (get_to a) = name) destinations then
-        (local_arrow   (get_from a)
-                      new_destination
-                      (get_transition a)
-                      (get_predicates a)
-                      false) :: (changeArrowsDestination destinations new_destination l)
-      else
-        a :: (changeArrowsDestination destinations new_destination l)
+      let arrows = List.filter (function arrow -> List.mem (get_from arrow) (SS.elements a)) (get_arrows nfa) in
+      let arrow_types = List.map (function arrow -> ((get_transition arrow), (get_predicates arrow))) arrows in
+      let arrow_types = removeDuplicates arrow_types in
+      let list_of_new_elems = 
+        List.map (  function arrow_type ->
+                      (* Storing all successors of a in a list *)
+                      let destinations_list = (
+                        List.map (function arrow -> get_to arrow)
+                          (List.filter (function arrow -> 
+                            if (get_transition arrow) = (fst arrow_type) && (get_predicates arrow) = (snd arrow_type) then
+                              true
+                            else
+                              false
+                            )
+                            arrows
+                          )
+                        )
+                      in
+                      (* Creating a set out of the list *)
+                      List.fold_right SS.add destinations_list SS.empty
+                  ) arrow_types
+        in
+      let new_stack_elems = List.filter (function elem_set -> not(List.mem (fromListToString (SS.elements elem_set)) (List.map get_name (get_sub dfa)))) (removeDuplicates list_of_new_elems) in
+      let new_arrows = 
+        List.map (  function arrow_type ->
+                      let destinations_list = (
+                        List.map (function arrow -> get_to arrow)
+                          (List.filter (function arrow -> 
+                            if (get_transition arrow) = (fst arrow_type) && (get_predicates arrow) = (snd arrow_type) then
+                              true
+                            else
+                              false
+                            )
+                            arrows
+                          )
+                        )
+                      in
+                      let destinations_set = SS.elements (List.fold_right SS.add destinations_list SS.empty) in
+                      local_arrow (fromListToString (SS.elements a)) (fromListToString destinations_set) (fst arrow_type) (snd arrow_type) false
+                  ) arrow_types
+      in
+      let new_shallow_final = List.filter (function elem -> List.exists (function e -> List.mem e (get_shallow_final nfa)) (SS.elements elem)) new_stack_elems in
+      let new_deep_final = List.filter (function elem -> List.exists (function e -> List.mem e (get_deep_final nfa)) (SS.elements elem)) new_stack_elems in
+      let dfa = automata_of (get_name dfa)
+                            ((get_sub dfa)@(List.map (function elem -> elem_of (fromListToString (SS.elements elem))) new_stack_elems))
+                            ((get_arrows dfa)@new_arrows)
+                            ((get_shallow_final dfa)@(List.map (function elem -> fromListToString (SS.elements elem)) new_shallow_final))
+                            ((get_deep_final dfa)@(List.map (function elem -> fromListToString (SS.elements elem)) new_deep_final))
+                            (get_init dfa)
+      in
+      determinize_step nfa dfa (l@new_stack_elems)
 
-(* Return the given arrows where those from an element of origins
-are redirected from new_origin
-!! Modified arrows are returned as Local arrows !! *)
-let rec changeArrowsOrigin origins new_origin arrows =
-  match arrows with
-    | [] -> []
-    | a::l ->
-      if List.exists (function name -> (get_from a) = name) origins then
-        (local_arrow   new_origin
-                      (get_to a)
-                      (get_transition a)
-                      (get_predicates a)
-                      false) :: (changeArrowsOrigin origins new_origin l)
-      else
-        a :: (changeArrowsOrigin origins new_origin l)
-
-let kleeneTransformArrows init_name final_names arrows =
-  let temp_arrows1 = kleeneTransformArrowsInit init_name (getArrowsFrom [init_name] arrows) arrows in
-  let temp_arrows2 = kleeneTransformArrowsFinals final_names temp_arrows1 in
-  let temp_arrows3 = kleeneTransformArrowsFromFinalsToInit init_name final_names temp_arrows2 in
-  let temp_arrows4 = changeArrowsDestination final_names init_name temp_arrows3 in
-  changeArrowsOrigin final_names init_name temp_arrows4
-      
+let determinize nfa =
+  let shallow_final = if List.mem (get_init nfa) (get_shallow_final nfa) then [get_init nfa] else [] in
+  let deep_final = if List.mem (get_init nfa) (get_deep_final nfa) then [get_init nfa] else [] in
+  let dfa = automata_of (get_name nfa)
+                        [elem_of (get_init nfa)]
+                        []
+                        shallow_final
+                        deep_final
+                        (get_init nfa)
+  in
+  determinize_step nfa dfa [SS.singleton (get_init nfa)]
 
 let rec minimize astd = 
 	match astd with
@@ -310,55 +187,17 @@ let rec minimize astd =
     
     | Automata (astd_name, sub_astds, arrows, shallow_final_names, deep_final_names, init_name) ->
       let min_sub_astds = List.map minimize sub_astds in (* Now all sub ASTDs are Elem or Automata with Elem sub ASTDs *)
-      let init_astd = find_subastd init_name min_sub_astds in
-      let new_init_name =
-      (match init_astd with
-        | Elem (_) -> init_name
-        | Automata (_, _, _, _, _, _) -> get_init init_astd
-        | _ -> failwith "minimize error: a sub ASTD is not Elem or Automata with Elem sub ASTDs"
-      ) in
-      automata_of astd_name 
-                  (bringOutElems min_sub_astds)
-                  ((transformArrowsIntoLocalBetweenElem min_sub_astds arrows)@(bringOutArrows min_sub_astds))
-                  shallow_final_names
-                  deep_final_names
-                  new_init_name
+      let nfa = automataTransform (automata_of astd_name min_sub_astds arrows shallow_final_names deep_final_names init_name) in
+      determinize nfa
       
-    | Sequence (astd_name, left_sub_astd, right_sub_astd) -> elem_of astd_name
-(*      let min_left_sub_astd = minimize left_sub_astd in*)
-(*      let min_right_sub_astd = minimize right_sub_astd in*)
-(*      automata_of astd_name*)
-(*                  (min_left_sub_astd@min_right_sub_astd)*)
-(*                  ((get_arrows min_left_sub_astd)@(get_arrows min_right_sub_astd))*)
-(*                  []*)
-(*                  (get_deep_final min_right_sub_astd)*)
-(*                  (get_init min_left_sub_astd)*)
+    | Sequence (astd_name, left_sub_astd, right_sub_astd) -> astd
 
-    | Choice (astd_name, left_sub_astd, right_sub_astd) -> elem_of astd_name
-(*      let min_left_sub_astd = minimize left_sub_astd in*)
-(*      let min_right_sub_astd = minimize right_sub_astd in*)
-(*      automata_of astd_name*)
-(*                            ((get_sub min_left_sub_astd)@(get_sub min_right_sub_astd))*)
-(*                            ((get_arrows min_left_sub_astd)@(get_arrows min_right_sub_astd))*)
-(*                            []*)
-(*                            ((get_deep_final min_left_sub_astd)@(get_deep_final min_right_sub_astd))*)
-(*                            (get_init min_left_sub_astd)*)
+    | Choice (astd_name, left_sub_astd, right_sub_astd) -> astd
 
     | Kleene (astd_name, sub_astd) ->
       let min_sub_astd = minimize sub_astd in
-      let deep_final_names = get_deep_final min_sub_astd in
-      let shallow_final_names = get_shallow_final min_sub_astd in
-      let init_name = get_init min_sub_astd in
-      let arrows = get_arrows min_sub_astd in
-      let new_arrows = kleeneTransformArrows init_name (shallow_final_names@deep_final_names) arrows in
-      (* Merge init state and final states *)
-      automata_of astd_name
-                  ((kleeneTransformElems init_name (deep_final_names@shallow_final_names) arrows)
-                  @(removeASTDs (deep_final_names@shallow_final_names) (get_sub min_sub_astd)))
-                  new_arrows
-                  [init_name]
-  					      []
-  					      init_name
+      let nfa = kleeneTransform astd_name min_sub_astd in
+      determinize nfa
 
     | Synchronisation (astd_name, transition_labels, left_sub_astd, right_sub_astd) -> astd
     
@@ -366,7 +205,8 @@ let rec minimize astd =
     
     | QChoice (astd_name, variable, domain, sub_astd) -> astd
 
-    | QSynchronisation (astd_name, variable, domain, transition_labels, sub_astd) -> astd  
+    | QSynchronisation (astd_name, variable, domain, transition_labels, sub_astd) ->
+      minimize sub_astd
 
     | QFork  (astd_name, variable, domain, predicates, transition_labels, sub_astd) -> astd
 
