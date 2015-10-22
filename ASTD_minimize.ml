@@ -2,7 +2,7 @@ open ASTD_B;;
 open ASTD_astd;;
 open ASTD_arrow;;
 
-(* A set structure for ASTD with lexicographic order as order relation *)
+(* A set structure for ASTD with lexicographic order *)
 module ASTDSet = Set.Make(struct
                             type t = ASTD_astd.t
                             let compare a b = compare (get_name a) (get_name b)
@@ -83,33 +83,93 @@ let rec simplifyInitFinals automata =
                                         (get_deep_final automata)
                                         (get_init automata))
 
+(* Return an equivalent automata where init state has only exit transitions
+and no entry one.
+
+Argument must be a Automata ASTD with Elem sub-ASTDs only *)
+let rec simplifyInit automata =
+  let isToTransform arrow = (get_to arrow = get_init automata) in
+  let arrows_to_transform = List.filter isToTransform (get_arrows automata) in
+  
+  match arrows_to_transform with
+    | [] -> automata (* Job completed *)
+  	
+    | a::l ->
+      (* One elementary state is added for a concerned state *)
+      (* Several arrows to be transformed share the same new state *)
+      let new_elem_name = (get_to a)^"Bis" in
+      
+      (* Rerouting the a arrow to the new state *)
+      let rerouted_arrows = 
+        let from_state = get_from a in
+        let to_state = new_elem_name in
+        ((local_arrow from_state to_state (get_transition a) (get_predicates a) false)
+          :: (List.filter (function arrow -> not(arrow = a)) (get_arrows automata)))
+      in
+      
+      (* Adding to the new state the same successors as init state *)
+      let new_arrows = 
+        List.map (function arrow -> local_arrow new_elem_name (get_to arrow) (get_transition arrow) (get_predicates arrow) false)
+          (List.filter (function arrow -> (get_from arrow) = (get_to a)) (get_arrows automata))
+      in
+      
+      let shallow_final = if List.mem (get_init automata) (get_shallow_final automata)
+                          then (removeDuplicates (new_elem_name::(get_shallow_final automata)))
+                          else (get_shallow_final automata)
+      in
+      
+      (* Since a new state and new arrows are added each time there is an arrow
+      to be transformed, we must remove duplicates in sub-ASTDs and arrows lists *)
+      simplifyInit (automata_of   (get_name automata)
+                                  (removeDuplicates ((elem_of new_elem_name)::(get_sub automata)))
+                                  (removeDuplicates (rerouted_arrows@new_arrows))
+                                  (shallow_final)
+                                  (get_deep_final automata)
+                                  (get_init automata))
 
 (* Return the kleene closure of the given automata
 
 Argument must be a Automata ASTD with Elem sub-ASTDs only *)
+(*let rec kleeneClosure name automata =*)
+(*  (* Simplifying init and final states to perform merging *)*)
+(*  let automata = simplifyInitFinals automata in*)
+(*  *)
+(*  (* Merge final and init states *)*)
+(*  let sub_astds = List.filter (function astd ->*)
+(*                                not( List.mem (get_name astd) ((get_shallow_final automata)@(get_deep_final automata)))*)
+(*                              )*)
+(*                              (get_sub automata)*)
+(*  in*)
+(*  *)
+(*  (* Rerouting entry transitions from finals to init *)*)
+(*  let arrows = List.map (function arrow ->*)
+(*                          if List.mem (get_to arrow) ((get_shallow_final automata)@(get_deep_final automata)) then*)
+(*                            local_arrow (get_from arrow) (get_init automata) (get_transition arrow) (get_predicates arrow) false*)
+(*                          else*)
+(*                            arrow*)
+(*                        )*)
+(*                        (get_arrows automata)*)
+(*  in*)
+(*  *)
+(*  automata_of name sub_astds arrows [(get_init automata)] [] (get_init automata)*)
+
 let rec kleeneClosure name automata =
-  (* Simplifying init and final states to perform merging *)
-  let automata = simplifyInitFinals automata in
+  (* Simplifying init state to perform merging *)
+  let automata = simplifyInit automata in
   
-  (* Merge final and init states *)
-  let sub_astds = List.filter (function astd ->
-                                not( List.mem (get_name astd) ((get_shallow_final automata)@(get_deep_final automata))
-                              )
-                              (get_sub automata)
+  (* Adding transitions from finals to init succesors *)
+  let new_arrows = List.map (function final ->
+                            List.map  (function arrow ->
+                                        local_arrow final (get_to arrow) (get_transition arrow) (get_predicates arrow) false)
+                                      (List.filter  (function arrow -> (get_from arrow) = (get_init automata))
+                                                    (get_arrows automata)
+                                      )
+                            )
+                            (get_shallow_final automata)
   in
+  let arrows = removeDuplicates ((List.concat new_arrows)@(get_arrows automata)) in
   
-  (* Rerouting entry transitions from finals to init *)
-  let arrows = List.map (function arrow ->
-                          if List.mem (get_to arrow) ((get_shallow_final automata)@(get_deep_final automata)) then
-                            local_arrow (get_from arrow) (get_init automata) (get_transition arrow) (get_predicates arrow) false
-                          else
-                            arrow
-                        )
-                        (get_arrows automata)
-  in
-  
-  automata_of kleene_name sub_astds arrows [(get_init automata)] [] (get_init automata)
-  	
+  automata_of name (get_sub automata) arrows ((get_init automata)::(get_shallow_final automata)) [] (get_init automata)
 
 (* Return an equivalent automata with a unique final state
 
@@ -263,20 +323,41 @@ let determinize nfa =
   determinize_step nfa dfa [ASTDSet.singleton (find_subastd (get_init nfa) (get_sub nfa))]
 
 
-let reverse automata =
-  let automata = simplifyFinals automata in
-  automata_of (get_name automata)
-              (get_sub automata)
-              (List.map (function a -> local_arrow (get_to a) (get_from a) (get_transition a) (get_predicates a) false)
-                (get_arrows automata))
-              [(get_init automata)]
-              []
-              (List.hd (get_shallow_final automata))
-              
-              
-let brzozowski automata =
-  determinize (reverse ((determinize (reverse automata))))
+(*let reverse automata =*)
+(*  let automata = simplifyFinals automata in*)
+(*  automata_of (get_name automata)*)
+(*              (get_sub automata)*)
+(*              (List.map (function a -> local_arrow (get_to a) (get_from a) (get_transition a) (get_predicates a) false)*)
+(*                (get_arrows automata))*)
+(*              [(get_init automata)]*)
+(*              []*)
+(*              (List.hd (get_shallow_final automata))*)
+(*              *)
+(*(* Brzozowski algorithm: determinize and minimize an automata *)*)
+(*let brzozowski automata =*)
+(*  determinize (reverse ((determinize (reverse automata))))*)
 
+let choiceTransform name left_astd right_astd =
+  let new_init_name = (get_init left_astd)^(get_init right_astd) in
+  let new_init = elem_of new_init_name in
+  let elems = new_init :: (List.filter  (function state -> 
+                                        (get_name state) != (get_init left_astd) && (get_name state) != (get_init right_astd)
+                                      )
+                                      ((get_sub left_astd)@(get_sub right_astd)))
+  in
+  let new_arrows = List.map (function a -> local_arrow new_init_name (get_to a) (get_transition a) (get_predicates a) false)
+                            (List.filter (function a -> ((get_from a) = (get_init left_astd) || (get_from a) = (get_init right_astd)))
+                                          ((get_arrows left_astd)@(get_arrows right_astd)))
+  in
+  let modified_arrows = List.map (function a -> local_arrow (get_from a) new_init_name (get_transition a) (get_predicates a) false)
+                                 (List.filter (function a -> ((get_to a) = (get_init left_astd)) || ((get_to a) = (get_init right_astd)))
+                                              ((get_arrows left_astd)@(get_arrows right_astd)))
+  in
+  let unchanged_arrows = (List.filter (function a -> not((get_from a) = (get_init left_astd) || (get_from a) = (get_init right_astd) || (get_to a) = (get_init left_astd) || (get_to a) = (get_init right_astd)))
+                      ((get_arrows left_astd)@(get_arrows right_astd)))
+  in
+  let arrows = new_arrows @ modified_arrows @ unchanged_arrows in
+  automata_of name elems arrows ((get_shallow_final left_astd)@(get_shallow_final right_astd)) [] new_init_name
 
 let rec minimize astd = 
 	match astd with
@@ -285,16 +366,17 @@ let rec minimize astd =
     | Automata (astd_name, sub_astds, arrows, shallow_final_names, deep_final_names, init_name) ->
       let min_sub_astds = List.map minimize sub_astds in (* Now all sub ASTDs are Elem or Automata with Elem sub ASTDs *)
       let nfa = automataTransform (automata_of astd_name min_sub_astds arrows shallow_final_names deep_final_names init_name) in
-      brzozowski nfa
+      determinize nfa
       
     | Sequence (astd_name, left_sub_astd, right_sub_astd) -> astd
 
-    | Choice (astd_name, left_sub_astd, right_sub_astd) -> astd
+    | Choice (astd_name, left_sub_astd, right_sub_astd) -> 
+      choiceTransform astd_name (minimize left_sub_astd) (minimize right_sub_astd)
 
     | Kleene (astd_name, sub_astd) ->
       let min_sub_astd = minimize sub_astd in
-      let nfa = kleeneTransform astd_name min_sub_astd in
-      brzozowski nfa
+      let nfa = kleeneClosure astd_name min_sub_astd in
+      determinize nfa
 
     | Synchronisation (astd_name, transition_labels, left_sub_astd, right_sub_astd) -> astd
     
